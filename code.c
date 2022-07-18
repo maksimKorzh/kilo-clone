@@ -33,7 +33,14 @@
 #define CURSOR_MAX "\x1b[999C\x1b[999B"
 #define HIDE_CURSOR "\x1b[?25l"
 #define SHOW_CURSOR "\x1b[?25h"
-#define INIT_BUFFER {NULL, 0}
+
+/****************************************\
+ ========================================
+
+                 SETTINGS
+
+ ========================================
+\****************************************/
 
 // special keys
 enum keys {
@@ -47,35 +54,22 @@ enum keys {
   END
 };
 
-// original terminal settings
-struct termios coocked_mode;
-
 // editor variables
 int ROWS = 80;
 int COLS = 24;
 int cury = 0;
 int curx = 0;
 
-// editor's internal buffer
-struct buffer {
-  char *string;
-  int len;
-};
+/****************************************\
+ ========================================
 
-// append string to buffer
-void append_buffer(struct buffer *buf, const char *string, int len) {
-  char *new_string = realloc(buf->string, buf->len + len);
-  
-  if (new_string == NULL) return;
-  memcpy(&new_string[buf->len], string, len);
-  buf->string = new_string;
-  buf->len += len;
-}
+                 TERMINAL
 
-// free buffer
-void clear_buffer(struct buffer *buf) {
-  free(buf->string);
-}
+ ========================================
+\****************************************/
+
+// original terminal settings
+struct termios coocked_mode;
 
 // clear screen
 void clear_screen() {
@@ -91,9 +85,7 @@ void die(const char *message) {
 }
 
 // restore terminal back to default mode
-void restore_terminal() {
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, &coocked_mode);
-}
+void restore_terminal() { tcsetattr(STDIN_FILENO, TCSAFLUSH, &coocked_mode); }
 
 // enable terminal raw mode
 void raw_mode() {
@@ -109,6 +101,39 @@ void raw_mode() {
   raw_mode.c_cc[VTIME] = 1;
   
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_mode) == -1) die("tcsetattr");
+}
+
+// get cursor ROW, COL position
+int get_cursor(int *rows, int * cols) {
+  char buf[32];
+  unsigned int i = 0;
+  
+  if (write(STDOUT_FILENO, GET_CURSOR, 4) != 4) return -1;
+  
+  while (i < sizeof(buf) - 1) {
+    if (read(STDIN_FILENO, &buf[i], 1) != 1) break;
+    if (buf[i] == 'R') break;
+    i++;
+  } buf[i] = '\0';
+  
+  if (buf[0] != '\x1b' || buf[1] != '[') return -1;
+  if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
+  
+  return 0;
+}
+
+// get terminal window size
+int get_window_size(int *rows, int *cols) {
+  struct winsize ws;
+  
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+    if (write(STDOUT_FILENO, CURSOR_MAX, 12) != 12) return -1;
+    return get_cursor(rows, cols);
+  } else {
+    *rows = ws.ws_row;
+    *cols = ws.ws_col;
+    return 0;
+  }
 }
 
 // control cursor
@@ -201,6 +226,35 @@ void read_keyboard() {
   }
 }
 
+/****************************************\
+ ========================================
+
+                  EDITOR
+
+ ========================================
+\****************************************/
+
+// editor's internal buffer
+struct buffer {
+  char *string;
+  int len;
+};
+
+// append string to buffer
+void append_buffer(struct buffer *buf, const char *string, int len) {
+  char *new_string = realloc(buf->string, buf->len + len);
+  
+  if (new_string == NULL) return;
+  memcpy(&new_string[buf->len], string, len);
+  buf->string = new_string;
+  buf->len += len;
+}
+
+// free buffer
+void clear_buffer(struct buffer *buf) {
+  free(buf->string);
+}
+
 // render editable file
 void print_buffer(struct buffer *buf) {
   for (int row = 0; row < ROWS; row++) {
@@ -227,7 +281,7 @@ void print_buffer(struct buffer *buf) {
 
 // refresh screen
 void update_screen() {
-  struct buffer buf = INIT_BUFFER;
+  struct buffer buf = {NULL, 0};
   append_buffer(&buf, HIDE_CURSOR, 6);
   append_buffer(&buf, RESET_CURSOR, 3);
   print_buffer(&buf);
@@ -239,38 +293,7 @@ void update_screen() {
   clear_buffer(&buf);
 }
 
-// get cursor ROW, COL position
-int get_cursor(int *rows, int * cols) {
-  char buf[32];
-  unsigned int i = 0;
-  
-  if (write(STDOUT_FILENO, GET_CURSOR, 4) != 4) return -1;
-  
-  while (i < sizeof(buf) - 1) {
-    if (read(STDIN_FILENO, &buf[i], 1) != 1) break;
-    if (buf[i] == 'R') break;
-    i++;
-  } buf[i] = '\0';
-  
-  if (buf[0] != '\x1b' || buf[1] != '[') return -1;
-  if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
-  
-  return 0;
-}
 
-// get terminal window size
-int get_window_size(int *rows, int *cols) {
-  struct winsize ws;
-  
-  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
-    if (write(STDOUT_FILENO, CURSOR_MAX, 12) != 12) return -1;
-    return get_cursor(rows, cols);
-  } else {
-    *rows = ws.ws_row;
-    *cols = ws.ws_col;
-    return 0;
-  }
-}
 
 int main() {
   raw_mode();
