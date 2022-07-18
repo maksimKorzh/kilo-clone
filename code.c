@@ -29,10 +29,19 @@
 #define CLEAR_LINE "\x1b[K"
 #define RESET_CURSOR "\x1b[H"
 #define GET_CURSOR "\x1b[6n"
+#define SET_CURSOR "\x1b[%d;%dH"
 #define CURSOR_MAX "\x1b[999C\x1b[999B"
 #define HIDE_CURSOR "\x1b[?25l"
 #define SHOW_CURSOR "\x1b[?25h"
 #define INIT_BUFFER {NULL, 0}
+
+// special keys
+enum keys {
+  ARROW_LEFT = 256,
+  ARROW_RIGHT,
+  ARROW_UP,
+  ARROW_DOWN
+};
 
 // original terminal settings
 struct termios coocked_mode;
@@ -98,15 +107,45 @@ void raw_mode() {
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw_mode) == -1) die("tcsetattr");
 }
 
+// control cursor
+void move_cursor(int key) {
+  switch(key) {
+    case ARROW_LEFT:
+      curx--;
+      break;
+    case ARROW_RIGHT:
+      curx++;
+      break;
+    case ARROW_UP:
+      cury--;
+      break;
+    case ARROW_DOWN:
+      cury++;
+      break;
+  }
+}
+
 // read a single key from STDIN
 int read_key() {
   int bytes;
   char c;
   
-  while ((bytes = read(STDIN_FILENO, &c, 1)) == -1)
+  while ((bytes = read(STDIN_FILENO, &c, 1)) != 1)
     if (bytes == -1 && errno != EAGAIN) die("read");
   
-  return c;
+  if (c == '\x1b') {
+    char seq[3];
+    if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
+    if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+    if (seq[0] == '[') {
+      switch (seq[1]) {
+        case 'A': return ARROW_UP;
+        case 'B': return ARROW_DOWN;
+        case 'C': return ARROW_RIGHT;
+        case 'D': return ARROW_LEFT;
+      }
+    } return '\x1b';
+  } else return c;
 }
 
 // process keypress
@@ -117,6 +156,16 @@ void read_keyboard() {
     case CONTROL('q'):
       clear_screen();
       exit(0);
+      break;
+
+    case ARROW_LEFT:
+    case ARROW_RIGHT:
+    case ARROW_UP:
+    case ARROW_DOWN:
+      move_cursor(c);
+      break;
+    default:
+      printf("KEY: %c\r\n", c);
       break;
   }
 }
@@ -148,11 +197,13 @@ void print_buffer(struct buffer *buf) {
 // refresh screen
 void update_screen() {
   struct buffer buf = INIT_BUFFER;
-  write(STDOUT_FILENO, HIDE_CURSOR, 6);
-  write(STDOUT_FILENO, RESET_CURSOR, 3);
+  append_buffer(&buf, HIDE_CURSOR, 6);
+  append_buffer(&buf, RESET_CURSOR, 3);
   print_buffer(&buf);
-  write(STDOUT_FILENO, RESET_CURSOR, 3);
-  write(STDOUT_FILENO, SHOW_CURSOR, 6);
+  char curpos[32];
+  snprintf(curpos, sizeof(curpos), SET_CURSOR, cury + 1, curx + 1);
+  append_buffer(&buf, curpos, strlen(curpos));
+  append_buffer(&buf, SHOW_CURSOR, 6);
   write(STDOUT_FILENO, buf.string, buf.len);
   clear_buffer(&buf);
 }
@@ -192,7 +243,7 @@ int get_window_size(int *rows, int *cols) {
 
 int main() {
   raw_mode();
-  get_window_size(&ROWS, &COLS);
+  if (get_window_size(&ROWS, &COLS) == -1) die("get_window_size");
 
   while (1) {
     update_screen();
