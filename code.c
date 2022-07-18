@@ -54,6 +54,23 @@ int ROWS = 80;
 int COLS = 24;
 int cury = 0;
 int curx = 0;
+int lines_number = 0;
+int row_offset = 0;
+
+// editor's 'screen'
+struct buffer {
+  char *string;
+  int len;
+};
+
+// line of text representation
+typedef struct text_buffer {
+  char *string;
+  int len;
+} text_buffer;
+
+// editor's lines of text
+text_buffer *text = NULL;
 
 /****************************************\
  ========================================
@@ -137,7 +154,7 @@ void move_cursor(int key) {
     case ARROW_LEFT: if (curx != 0) curx--; break;
     case ARROW_RIGHT: if (curx != COLS - 1) curx++; break;
     case ARROW_UP: if (cury != 0)cury--; break;
-    case ARROW_DOWN: if (cury != ROWS - 1)cury++; break;
+    case ARROW_DOWN: if (cury != lines_number)cury++; break;
   }
 }
 
@@ -204,22 +221,6 @@ void read_keyboard() {
  ========================================
 \****************************************/
 
-// editor's 'screen'
-struct buffer {
-  char *string;
-  int len;
-};
-
-// line of text representation
-typedef struct text_buffer {
-  char *string;
-  int len;
-} text_buffer;
-
-// editor's lines of text
-int lines_number = 0;
-text_buffer *text = NULL;
-
 // append string to buffer
 void append_buffer(struct buffer *buf, const char *string, int len) {
   char *new_string = realloc(buf->string, buf->len + len);
@@ -238,7 +239,8 @@ void clear_buffer(struct buffer *buf) {
 // render editable file
 void print_buffer(struct buffer *buf) {
   for (int row = 0; row < ROWS; row++) {
-    if (row >= lines_number) {
+    int bufrow = row + row_offset;
+    if (bufrow >= lines_number) {
       if (lines_number == 0 && row == ROWS / 3) {
         char info[100];
         int infolen = snprintf(info, sizeof(info), "Minimalist code editor");
@@ -253,15 +255,26 @@ void print_buffer(struct buffer *buf) {
         append_buffer(buf, "~", 1);
       }
     } else {
-      int len = text[row].len;
+      int len = text[bufrow].len;
       if (len > COLS) len = COLS;
-      append_buffer(buf, text[row].string, len);
+      append_buffer(buf, text[bufrow].string, len);
     }
     
     append_buffer(buf, CLEAR_LINE, 3);
     if (row < ROWS - 1) {
       append_buffer(buf, "\r\n", 2);
     }
+  }
+}
+
+// scroll text
+void scroll_buffer() {
+  if (cury < row_offset) {
+    row_offset = cury;
+  }
+  
+  if (cury >= row_offset + ROWS) {
+    row_offset = cury - ROWS + 1;
   }
 }
 
@@ -278,12 +291,13 @@ void append_row(char *string, size_t len) {
 
 // refresh screen
 void update_screen() {
+  scroll_buffer();
   struct buffer buf = {NULL, 0};
   append_buffer(&buf, HIDE_CURSOR, 6);
   append_buffer(&buf, RESET_CURSOR, 3);
   print_buffer(&buf);
   char curpos[32];
-  snprintf(curpos, sizeof(curpos), SET_CURSOR, cury + 1, curx + 1);
+  snprintf(curpos, sizeof(curpos), SET_CURSOR, (cury - row_offset) + 1, curx + 1);
   append_buffer(&buf, curpos, strlen(curpos));
   append_buffer(&buf, SHOW_CURSOR, 6);
   write(STDOUT_FILENO, buf.string, buf.len);
@@ -310,7 +324,6 @@ void open_file(char *filename) {
   while ((linelen = getline(&line, &linecap, fp)) != -1) {  
     while (linelen > 0 && (line[linelen-1] == '\n' || line[linelen-1] == '\r')) linelen--;
     append_row(line, linelen);
-    write(STDOUT_FILENO, line, linelen);
   }
 
   free(line);
