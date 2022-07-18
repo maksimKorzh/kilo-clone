@@ -1,4 +1,4 @@
-	/***	****	*	********************************\
+/****************************************\
  ========================================
 
                    CODE
@@ -34,6 +34,8 @@
 #define CURSOR_MAX "\x1b[999C\x1b[999B"
 #define HIDE_CURSOR "\x1b[?25l"
 #define SHOW_CURSOR "\x1b[?25h"
+#define INVERT_VIDEO "\x1b[7m"
+#define RESTORE_VIDEO "\x1b[m"
 
 /****************************************\
  ========================================
@@ -79,6 +81,12 @@ typedef struct text_buffer {
 // editor's lines of text
 text_buffer *text = NULL;
 
+// current filename
+char *filename = NULL;
+
+// original terminal settings
+struct termios coocked_mode;
+
 /****************************************\
  ========================================
 
@@ -86,9 +94,6 @@ text_buffer *text = NULL;
 
  ========================================
 \****************************************/
-
-// original terminal settings
-struct termios coocked_mode;
 
 // clear screen
 void clear_screen() {
@@ -294,9 +299,7 @@ void print_buffer(struct buffer *buf) {
     }
     
     append_buffer(buf, CLEAR_LINE, 3);
-    if (row < ROWS - 1) {
-      append_buffer(buf, "\r\n", 2);
-    }
+    append_buffer(buf, "\r\n", 2);
   }
 }
 
@@ -352,6 +355,25 @@ void append_row(char *string, size_t len) {
   lines_number++;
 }
 
+// draw status bar
+void print_status_bar(struct buffer *buf) {
+  append_buffer(buf, INVERT_VIDEO, 4);
+  char message_left[80]; char message_right[80];
+  int len_left = snprintf(message_left, sizeof(message_left), "%.20s - %d lines", filename ? filename : "[No file]", lines_number);
+  int len_right = snprintf(message_right, sizeof(message_right), "Row %d, Col %d", cury + 1, curx + 1);
+  if (len_left > COLS) len_left = COLS;
+  append_buffer(buf, message_left, len_left);
+  while (len_left < COLS) {
+    if (COLS - len_left == len_right) {
+      append_buffer(buf, message_right, len_right);
+      break;
+    } else {
+		  append_buffer(buf, " ", 1);
+		  len_left++;
+    }
+  } append_buffer(buf, RESTORE_VIDEO, 3);
+}
+
 // refresh screen
 void update_screen() {
   scroll_buffer();
@@ -359,6 +381,7 @@ void update_screen() {
   append_buffer(&buf, HIDE_CURSOR, 6);
   append_buffer(&buf, RESET_CURSOR, 3);
   print_buffer(&buf);
+  print_status_bar(&buf);
   char curpos[32];
   snprintf(curpos, sizeof(curpos), SET_CURSOR, (cury - row_offset) + 1, (renderx - col_offset) + 1);
   append_buffer(&buf, curpos, strlen(curpos));
@@ -376,8 +399,11 @@ void update_screen() {
  ========================================
 \****************************************/
 
-void open_file(char *filename) {
-  FILE *fp = fopen(filename, "r");
+void open_file(char *file_name) {
+  free(filename);
+  filename = strdup(file_name);
+  
+  FILE *fp = fopen(file_name, "r");
   if (!fp) die("fopen");
   
   char *line = NULL;
@@ -404,6 +430,7 @@ void open_file(char *filename) {
 int main() {
   raw_mode();
   if (get_window_size(&ROWS, &COLS) == -1) die("get_window_size");
+  ROWS--;
   open_file("code.c");
   
   
