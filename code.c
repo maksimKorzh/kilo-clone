@@ -1,4 +1,4 @@
-/****************************************\
+	/***	****	*	********************************\
  ========================================
 
                    CODE
@@ -43,6 +43,9 @@
  ========================================
 \****************************************/
 
+// configurables
+int TAB_WIDTH = 4;
+
 // special keys
 enum { ARROW_LEFT = 1000, ARROW_RIGHT, ARROW_UP, ARROW_DOWN, PAGE_UP, PAGE_DOWN, HOME, END };
 int keys_group_1[] = { HOME, -1, -1, END, PAGE_UP, PAGE_DOWN, HOME, END };
@@ -54,6 +57,7 @@ int ROWS = 80;
 int COLS = 24;
 int cury = 0;
 int curx = 0;
+int renderx = 0;
 int lines_number = 0;
 int row_offset = 0;
 int col_offset = 0;
@@ -67,7 +71,9 @@ struct buffer {
 // line of text representation
 typedef struct text_buffer {
   char *string;
+  char *render;
   int len;
+  int render_len;
 } text_buffer;
 
 // editor's lines of text
@@ -151,12 +157,29 @@ int get_window_size(int *rows, int *cols) {
 
 // control cursor
 void move_cursor(int key) {
+  text_buffer *row = (cury >= lines_number) ? NULL : &text[cury];
   switch(key) {
-    case ARROW_LEFT: if (curx != 0) curx--; break;
-    case ARROW_RIGHT: curx++; break;
+    case ARROW_LEFT:
+      if (curx != 0) curx--;
+      else if (cury > 0) {
+        cury--;
+        curx = text[cury].len;
+      }
+      break;
+    case ARROW_RIGHT:
+      if (row && curx < row->len) curx++;
+      else if (row && curx == row->len) {
+        cury++;
+        curx = 0;
+      }
+      break;
     case ARROW_UP: if (cury != 0)cury--; break;
     case ARROW_DOWN: if (cury != lines_number)cury++; break;
   }
+  
+  row = (cury >= lines_number) ? NULL : &text[cury];
+  int rowlen = row ? row->len : 0;
+  if (curx > rowlen) curx = rowlen;
 }
 
 // read a single key from STDIN
@@ -192,12 +215,20 @@ void read_keyboard() {
       break;
     
     case HOME: curx = 0; break;
-    case END: curx = COLS - 1; break;
+    case END:
+      if(cury < lines_number) curx = text[cury].len;
+      break;
     
     case PAGE_UP:
     case PAGE_DOWN:
       {
-        int times = COLS;
+        if (c == PAGE_UP) cury = row_offset;
+        else if (c == PAGE_DOWN) {
+          cury = row_offset + ROWS - 1;
+          if (cury > lines_number) cury = lines_number;
+        }
+        
+        int times = ROWS;
         while (times--) move_cursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
       } break;
     
@@ -256,10 +287,10 @@ void print_buffer(struct buffer *buf) {
         append_buffer(buf, "~", 1);
       }
     } else {
-      int len = text[bufrow].len - col_offset;
+      int len = text[bufrow].render_len - col_offset;
       if (len < 0) len = 0;
       if (len > COLS) len = COLS;
-      append_buffer(buf, &text[bufrow].string[col_offset], len);
+      append_buffer(buf, &text[bufrow].render[col_offset], len);
     }
     
     append_buffer(buf, CLEAR_LINE, 3);
@@ -269,12 +300,42 @@ void print_buffer(struct buffer *buf) {
   }
 }
 
+// convert curx to renderx
+int curx_to_renderx(text_buffer *row, int current_x) {
+  int render_x = 0;
+  for (int col = 0; col < current_x; col++) {
+    if (row->string[col] == '\t') render_x += (TAB_WIDTH - 1) - (render_x % TAB_WIDTH);
+    render_x++;
+  } return render_x;
+}
+
 // scroll text
 void scroll_buffer() {
+  renderx = 0;
+  if (cury < lines_number) renderx = curx_to_renderx(&text[cury], curx);
   if (cury < row_offset) { row_offset = cury; }
   if (cury >= row_offset + ROWS) { row_offset = cury - ROWS + 1; }
-  if (curx < col_offset) col_offset = curx;
-  if (curx >= col_offset + COLS) col_offset = curx - COLS + 1;
+  if (renderx < col_offset) col_offset = renderx;
+  if (renderx >= col_offset + COLS) col_offset = renderx - COLS + 1;
+}
+
+// update row
+void update_row(text_buffer *row) {
+  int tabs = 0;
+  for (int col = 0; col < row->len; col++)
+    if (row->string[col] == '\t') tabs++;
+  
+  free(row->render);
+  row->render = malloc(row->len + tabs*(TAB_WIDTH - 1) + 1);
+  int index = 0;
+  for (int col = 0; col < row->len; col++) {
+    if (row->string[col] == '\t') {
+      row->render[index++] = ' ';
+      while (index % TAB_WIDTH != 0) row->render[index++] = ' ';
+    } else row->render[index++] = row->string[col];
+  }
+  row->render[index] = '\0';
+  row->render_len = index;
 }
 
 // append row
@@ -285,6 +346,9 @@ void append_row(char *string, size_t len) {
   text[linenum].len = len;
   memcpy(text[linenum].string, string, len);
   text[linenum].string[len] = '\0';
+  text[linenum].render = NULL;
+  text[linenum].render_len = 0;
+  update_row(&text[linenum]);
   lines_number++;
 }
 
@@ -296,7 +360,7 @@ void update_screen() {
   append_buffer(&buf, RESET_CURSOR, 3);
   print_buffer(&buf);
   char curpos[32];
-  snprintf(curpos, sizeof(curpos), SET_CURSOR, (cury - row_offset) + 1, (curx - col_offset) + 1);
+  snprintf(curpos, sizeof(curpos), SET_CURSOR, (cury - row_offset) + 1, (renderx - col_offset) + 1);
   append_buffer(&buf, curpos, strlen(curpos));
   append_buffer(&buf, SHOW_CURSOR, 6);
   write(STDOUT_FILENO, buf.string, buf.len);
