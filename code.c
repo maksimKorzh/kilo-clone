@@ -56,6 +56,7 @@ int cury = 0;
 int curx = 0;
 int lines_number = 0;
 int row_offset = 0;
+int col_offset = 0;
 
 // editor's 'screen'
 struct buffer {
@@ -152,7 +153,7 @@ int get_window_size(int *rows, int *cols) {
 void move_cursor(int key) {
   switch(key) {
     case ARROW_LEFT: if (curx != 0) curx--; break;
-    case ARROW_RIGHT: if (curx != COLS - 1) curx++; break;
+    case ARROW_RIGHT: curx++; break;
     case ARROW_UP: if (cury != 0)cury--; break;
     case ARROW_DOWN: if (cury != lines_number)cury++; break;
   }
@@ -255,9 +256,10 @@ void print_buffer(struct buffer *buf) {
         append_buffer(buf, "~", 1);
       }
     } else {
-      int len = text[bufrow].len;
+      int len = text[bufrow].len - col_offset;
+      if (len < 0) len = 0;
       if (len > COLS) len = COLS;
-      append_buffer(buf, text[bufrow].string, len);
+      append_buffer(buf, &text[bufrow].string[col_offset], len);
     }
     
     append_buffer(buf, CLEAR_LINE, 3);
@@ -269,13 +271,10 @@ void print_buffer(struct buffer *buf) {
 
 // scroll text
 void scroll_buffer() {
-  if (cury < row_offset) {
-    row_offset = cury;
-  }
-  
-  if (cury >= row_offset + ROWS) {
-    row_offset = cury - ROWS + 1;
-  }
+  if (cury < row_offset) { row_offset = cury; }
+  if (cury >= row_offset + ROWS) { row_offset = cury - ROWS + 1; }
+  if (curx < col_offset) col_offset = curx;
+  if (curx >= col_offset + COLS) col_offset = curx - COLS + 1;
 }
 
 // append row
@@ -297,7 +296,7 @@ void update_screen() {
   append_buffer(&buf, RESET_CURSOR, 3);
   print_buffer(&buf);
   char curpos[32];
-  snprintf(curpos, sizeof(curpos), SET_CURSOR, (cury - row_offset) + 1, curx + 1);
+  snprintf(curpos, sizeof(curpos), SET_CURSOR, (cury - row_offset) + 1, (curx - col_offset) + 1);
   append_buffer(&buf, curpos, strlen(curpos));
   append_buffer(&buf, SHOW_CURSOR, 6);
   write(STDOUT_FILENO, buf.string, buf.len);
