@@ -14,14 +14,16 @@
 \****************************************/
 
 // libraries
-#include <unistd.h>
-#include <termios.h>
-#include <stdlib.h>
+#include <time.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <errno.h>
-#include <sys/ioctl.h>
 #include <string.h>
+#include <stdarg.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <termios.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 
 // editor definition
@@ -83,6 +85,10 @@ text_buffer *text = NULL;
 
 // current filename
 char *filename = NULL;
+
+// info message
+char info_message[80];
+time_t info_message_time = 0;
 
 // original terminal settings
 struct termios coocked_mode;
@@ -374,6 +380,24 @@ void print_status_bar(struct buffer *buf) {
   } append_buffer(buf, RESTORE_VIDEO, 3);
 }
 
+// print message bar
+void print_message_bar(struct buffer *buf) {
+  append_buffer(buf, CLEAR_LINE, 3);
+  int msglen = strlen(info_message);
+  if (msglen > COLS) msglen = COLS;
+  if (msglen && time(NULL) - info_message_time < 5)
+    append_buffer(buf, info_message, msglen);
+}
+
+// print a message under the status bar
+void print_info_message(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(info_message, sizeof(info_message), fmt, ap);
+  va_end(ap);
+  info_message_time = time(NULL);
+}
+
 // refresh screen
 void update_screen() {
   scroll_buffer();
@@ -382,6 +406,7 @@ void update_screen() {
   append_buffer(&buf, RESET_CURSOR, 3);
   print_buffer(&buf);
   print_status_bar(&buf);
+  print_message_bar(&buf);
   char curpos[32];
   snprintf(curpos, sizeof(curpos), SET_CURSOR, (cury - row_offset) + 1, (renderx - col_offset) + 1);
   append_buffer(&buf, curpos, strlen(curpos));
@@ -430,9 +455,9 @@ void open_file(char *file_name) {
 int main() {
   raw_mode();
   if (get_window_size(&ROWS, &COLS) == -1) die("get_window_size");
-  ROWS--;
+  ROWS -= 2;
   open_file("code.c");
-  
+  print_info_message("Press 'Ctrl-e' to enter command mode");  
   
   while (1) {
     update_screen();
