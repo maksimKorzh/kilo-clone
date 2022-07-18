@@ -1,7 +1,7 @@
 /****************************************\
  ========================================
 
-                  CODE
+                   CODE
 
         minimalist terminal based
               text editor
@@ -22,8 +22,9 @@
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <string.h>
+#include <sys/types.h>
 
-// definitions
+// editor definition
 #define CONTROL(k) ((k) & 0x1f)
 #define CLEAR_SCREEN "\x1b[2J"
 #define CLEAR_LINE "\x1b[K"
@@ -43,16 +44,10 @@
 \****************************************/
 
 // special keys
-enum keys {
-  ARROW_LEFT = 256,
-  ARROW_RIGHT,
-  ARROW_UP,
-  ARROW_DOWN,
-  PAGE_UP,
-  PAGE_DOWN,
-  HOME,
-  END
-};
+enum { ARROW_LEFT = 1000, ARROW_RIGHT, ARROW_UP, ARROW_DOWN, PAGE_UP, PAGE_DOWN, HOME, END };
+int keys_group_1[] = { HOME, -1, -1, END, PAGE_UP, PAGE_DOWN, HOME, END };
+int keys_group_2[] = { ARROW_UP, ARROW_DOWN, ARROW_RIGHT, ARROW_LEFT, -1, END, -1, HOME };
+int keys_group_3[] = { END, -1, HOME};
 
 // editor variables
 int ROWS = 80;
@@ -152,44 +147,18 @@ int read_key() {
   char c;
   
   while ((bytes = read(STDIN_FILENO, &c, 1)) != 1)
-    if (bytes == -1 && errno != EAGAIN) die("read");
-  
+  if (bytes == -1 && errno != EAGAIN) die("read");
   if (c == '\x1b') {
     char seq[3];
     if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
     if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
-    
-    //printf("%s\r\n", seq);
-    //return 0;
-    
     if (seq[0] == '[') {
       if (seq[1] >= '0' && seq[1] <= '9') {
         if (read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
-        if (seq[2] == '~') {
-          switch (seq[1]) {
-            case '1': return HOME;
-            case '4': return END;
-            case '5': return PAGE_UP;
-            case '6': return PAGE_DOWN;
-            case '7': return HOME;
-            case '8': return END;
-          }
-        }
-      } else {
-        switch (seq[1]) {
-          case 'A': return ARROW_UP;
-          case 'B': return ARROW_DOWN;
-          case 'C': return ARROW_RIGHT;
-          case 'D': return ARROW_LEFT;
-          case 'H': return HOME;
-          case 'F': return END;
-        }
-      }
+        if (seq[2] == '~') return keys_group_1[seq[1] - '1'];
+      } else return keys_group_2[seq[1] - 'A'];
     } else if (seq[0] == 'O') {
-      switch (seq[1]) {
-        case 'H': return HOME;
-        case 'F': return END;
-      }
+      return keys_group_3[seq[1] - 'F'];
     } return '\x1b';
   } else return c;
 }
@@ -226,6 +195,7 @@ void read_keyboard() {
   }
 }
 
+
 /****************************************\
  ========================================
 
@@ -234,11 +204,21 @@ void read_keyboard() {
  ========================================
 \****************************************/
 
-// editor's internal buffer
+// editor's 'screen'
 struct buffer {
   char *string;
   int len;
 };
+
+// line of text representation
+typedef struct text_buffer {
+  char *string;
+  int len;
+} text_buffer;
+
+// editor's lines of text
+int lines_number = 0;
+text_buffer *text = NULL;
 
 // append string to buffer
 void append_buffer(struct buffer *buf, const char *string, int len) {
@@ -258,18 +238,24 @@ void clear_buffer(struct buffer *buf) {
 // render editable file
 void print_buffer(struct buffer *buf) {
   for (int row = 0; row < ROWS; row++) {
-    if (row == ROWS / 3) {
-      char info[100];
-      int infolen = snprintf(info, sizeof(info), "Minimalist code editor");
-      if (infolen > COLS) infolen = COLS;
-      int padding = (COLS - infolen) / 2;
-      if (padding) {
+    if (row >= lines_number) {
+      if (lines_number == 0 && row == ROWS / 3) {
+        char info[100];
+        int infolen = snprintf(info, sizeof(info), "Minimalist code editor");
+        if (infolen > COLS) infolen = COLS;
+        int padding = (COLS - infolen) / 2;
+        if (padding) {
+          append_buffer(buf, "~", 1);
+          padding--;
+        } while(padding--) append_buffer(buf, " ", 1);
+        append_buffer(buf, info, infolen);
+      } else {
         append_buffer(buf, "~", 1);
-        padding--;
-      } while(padding--) append_buffer(buf, " ", 1);
-      append_buffer(buf, info, infolen);
+      }
     } else {
-      append_buffer(buf, "~", 1);
+      int len = text[row].len;
+      if (len > COLS) len = COLS;
+      append_buffer(buf, text[row].string, len);
     }
     
     append_buffer(buf, CLEAR_LINE, 3);
@@ -277,6 +263,17 @@ void print_buffer(struct buffer *buf) {
       append_buffer(buf, "\r\n", 2);
     }
   }
+}
+
+// append row
+void append_row(char *string, size_t len) {
+  text = realloc(text, sizeof(text_buffer) * (lines_number + 1));
+  int linenum = lines_number;
+  text[linenum].string = malloc(len + 1);
+  text[linenum].len = len;
+  memcpy(text[linenum].string, string, len);
+  text[linenum].string[len] = '\0';
+  lines_number++;
 }
 
 // refresh screen
@@ -294,11 +291,46 @@ void update_screen() {
 }
 
 
+/****************************************\
+ ========================================
+
+                 FILE I/O
+
+ ========================================
+\****************************************/
+
+void open_file(char *filename) {
+  FILE *fp = fopen(filename, "r");
+  if (!fp) die("fopen");
+  
+  char *line = NULL;
+  size_t linecap = 0;
+  ssize_t linelen;
+
+  while ((linelen = getline(&line, &linecap, fp)) != -1) {  
+    while (linelen > 0 && (line[linelen-1] == '\n' || line[linelen-1] == '\r')) linelen--;
+    append_row(line, linelen);
+    write(STDOUT_FILENO, line, linelen);
+  }
+
+  free(line);
+  fclose(fp);
+}
+
+/****************************************\
+ ========================================
+
+                   MAIN
+
+ ========================================
+\****************************************/
 
 int main() {
   raw_mode();
   if (get_window_size(&ROWS, &COLS) == -1) die("get_window_size");
-
+  open_file("code.c");
+  
+  
   while (1) {
     update_screen();
     read_keyboard();
