@@ -141,7 +141,7 @@ void new_file();
 
 // system integration
 char *command_prompt(char *command);
-
+void execute();
 
 /****************************************\
  ========================================
@@ -275,6 +275,7 @@ void read_keyboard() {
       char *name = command_prompt("Open file > %s");
       if (name != NULL) open_file(name); break;
     }
+    case CONTROL('e'): execute(); break;
     case CONTROL('q'): clear_screen(); free(text); exit(0); break;
     case CONTROL('s'): save_file(); break;
     case HOME: curx = 0; break;
@@ -612,6 +613,7 @@ void new_file() {
   modified = 0;
 }
 
+
 /****************************************\
  ========================================
 
@@ -650,6 +652,17 @@ char *command_prompt(char *command) {
     }
   }
 }
+
+// execute system command
+void execute() {
+  char *command = command_prompt("$ %s");
+  clear_screen();
+  restore_terminal();
+  if (command != NULL) system(command);
+  printf("Press enter to continue...\n");
+  read_key(); raw_mode();
+}
+
 
 /****************************************\
  ========================================
