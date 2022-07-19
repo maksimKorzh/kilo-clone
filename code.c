@@ -18,6 +18,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 #include <stdarg.h>
 #include <unistd.h>
@@ -51,8 +52,8 @@
 int TAB_WIDTH = 4;
 
 // special keys
-enum { ARROW_LEFT = 1000, ARROW_RIGHT, ARROW_UP, ARROW_DOWN, PAGE_UP, PAGE_DOWN, HOME, END };
-int keys_group_1[] = { HOME, -1, -1, END, PAGE_UP, PAGE_DOWN, HOME, END };
+enum { BACKSPACE = 127, ARROW_LEFT = 1000, ARROW_RIGHT, ARROW_UP, ARROW_DOWN, PAGE_UP, PAGE_DOWN, HOME, END, DEL };
+int keys_group_1[] = { HOME, -1, DEL, END, PAGE_UP, PAGE_DOWN, HOME, END };
 int keys_group_2[] = { ARROW_UP, ARROW_DOWN, ARROW_RIGHT, ARROW_LEFT, -1, END, -1, HOME };
 int keys_group_3[] = { END, -1, HOME};
 
@@ -67,6 +68,7 @@ int userx = 0;
 int lines_number = 0;
 int row_offset = 0;
 int col_offset = 0;
+int modified = 0;
 
 // editor's 'screen'
 struct buffer {
@@ -95,6 +97,12 @@ time_t info_message_time = 0;
 // original terminal settings
 struct termios coocked_mode;
 
+// protos
+void insert_char(int c);
+void delete_char();
+void save_file();
+void append_string(text_buffer *row, char *string, size_t len);
+void delete_row(int row);
 /****************************************\
  ========================================
 
@@ -235,14 +243,27 @@ void read_keyboard() {
   int c = read_key();
   
   switch(c) {
+    case '\r':
+      break;
+
     case CONTROL('q'):
       clear_screen();
       exit(0);
       break;
     
+    case CONTROL('s'):
+      save_file();
+      break;
+    
     case HOME: curx = 0; break;
     case END:
       if(cury < lines_number) curx = text[cury].len;
+      break;
+    
+    case DEL:
+    case BACKSPACE:
+      if (c == DEL) move_cursor(ARROW_RIGHT);
+      delete_char();
       break;
     
     case PAGE_UP:
@@ -265,7 +286,7 @@ void read_keyboard() {
       move_cursor(c);
       break;
     default:
-      //printf("KEY: %c\r\n", c);
+      insert_char(c);
       break;
   }
 }
@@ -365,6 +386,9 @@ void update_row(text_buffer *row) {
 // append row
 void append_row(char *string, size_t len) {
   text = realloc(text, sizeof(text_buffer) * (lines_number + 1));
+  
+  
+  
   int linenum = lines_number;
   text[linenum].string = malloc(len + 1);
   text[linenum].len = len;
@@ -374,13 +398,100 @@ void append_row(char *string, size_t len) {
   text[linenum].render_len = 0;
   update_row(&text[linenum]);
   lines_number++;
+  modified++;
+}
+
+// update row with newly inserted char
+void update_row_insert(text_buffer *row, int col, int c) {
+  if (col < 0 || col > row->len) col = row->len;
+  row->string = realloc(row->string, row->len + 2);
+  memmove(&row->string[col + 1], &row->string[col], row->len - col + 1);
+  row->len++;
+  row->string[col] = c;
+  update_row(row);
+  modified++;
+}
+
+// insert char to a given row
+void insert_char(int c) {
+  if (cury == lines_number) append_row("", 0);
+  update_row_insert(&text[cury], curx, c);
+  curx++;
+  userx++;
+}
+
+// update row with newly deleted char
+void update_row_delete(text_buffer *row, int col) {
+  if (col < 0 || col >= row->len) return;
+  memmove(&row->string[col], &row->string[col + 1], row->len - col);
+  row->len--;
+  update_row(row);
+  modified++;
+}
+
+// delete char in a given row
+void delete_char() {
+  if (cury == lines_number) return;
+  if (curx == 0 && cury == 0) return;
+  text_buffer *row = &text[cury];
+  if (curx > 0) {
+    update_row_delete(row, curx - 1);
+    curx--;
+    userx--;
+  } else {
+    curx = text[cury - 1].len; userx = curx;
+    append_string(&text[cury - 1], row->string, row->len);
+    delete_row(cury);
+    cury--;
+  }
+}
+
+// append a string to a given row
+void append_string(text_buffer *row, char *string, size_t len) {
+  row->string = realloc(row->string, row->len + len + 1);
+  memcpy(&row->string[row->len], string, len);
+  row->len += len;
+  row->string[row->len] = '\0';
+  update_row(row);
+  modified++;
+}
+
+// free memory from a row data
+void free_row(text_buffer *row) {
+  free(row->string);
+  free(row->render);
+}
+
+// delete row
+void delete_row(int row) {
+  if (row < 0 || row >= lines_number) return;
+  free_row(&text[row]);
+  memmove(&text[row], &text[row + 1], sizeof(text_buffer) * (lines_number - row - 1));
+  lines_number--;
+  modified++;
+}
+
+// convert text buffer to string
+char *buffer_to_string(int *buffer_len) {
+  int total_len = 0;
+  for (int row = 0; row < lines_number; row++)
+    total_len += text[row].len + 1;
+  *buffer_len = total_len;
+  char *buffer_string = malloc(total_len);
+  char *p = buffer_string;
+  for (int row = 0; row < lines_number; row++) {
+    memcpy(p, text[row].string, text[row].len);
+    p += text[row].len;
+    *p = '\n';
+    p++;
+  } return buffer_string;
 }
 
 // draw status bar
 void print_status_bar(struct buffer *buf) {
   append_buffer(buf, INVERT_VIDEO, 4);
   char message_left[80]; char message_right[80];
-  int len_left = snprintf(message_left, sizeof(message_left), "%.20s - %d lines", filename ? filename : "[No file]", lines_number);
+  int len_left = snprintf(message_left, sizeof(message_left), "%.20s - %d lines %s", filename ? filename : "[No file]", lines_number, modified ? "[modified]" : "");
   int len_right = snprintf(message_right, sizeof(message_right), "Row %d, Col %d", cury + 1, curx + 1);
   if (len_left > COLS) len_left = COLS;
   append_buffer(buf, message_left, len_left);
@@ -442,6 +553,7 @@ void update_screen() {
  ========================================
 \****************************************/
 
+// read file from disk
 void open_file(char *file_name) {
   free(filename);
   filename = strdup(file_name);
@@ -460,6 +572,29 @@ void open_file(char *file_name) {
 
   free(line);
   fclose(fp);
+  modified = 0;
+}
+
+// write file to disk
+void save_file() {
+  if (filename == NULL) return;
+  
+  int len;
+  char *buffer = buffer_to_string(&len);
+  
+  int fd = open(filename, O_RDWR | O_CREAT, 0644);
+  if (fd != -1) {
+    if (ftruncate(fd, len) != -1) {
+      if (write(fd, buffer, len) == len) {
+        close(fd);
+        free(buffer);
+        modified = 0;
+        print_info_message("%d bytes written to disk", len);
+        return;
+      }
+    } close(fd);
+  } free(buffer);
+  print_info_message("Failed to save file! I/O error: %s", strerror(errno));
 }
 
 /****************************************\
@@ -474,7 +609,7 @@ int main() {
   raw_mode();
   if (get_window_size(&ROWS, &COLS) == -1) die("get_window_size");
   ROWS -= 2;
-  open_file("code.c");
+  open_file("test.txt");
   print_info_message("                       Press 'Ctrl-e' to enter command mode");  
   
   while (1) {
@@ -482,6 +617,3 @@ int main() {
     read_keyboard();
   }
 }
-
-
-// ddddddddddddddddddddddddddddddddd
