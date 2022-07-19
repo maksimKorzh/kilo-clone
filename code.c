@@ -137,6 +137,7 @@ void init_editor();
 // file I/O
 void open_file(char *file_name);
 void save_file();
+void new_file();
 
 // system integration
 char *command_prompt(char *command);
@@ -268,6 +269,8 @@ void read_keyboard() {
   int c = read_key();
   switch(c) {
     case '\r': insert_new_line(); break;
+    case CONTROL('n'): new_file(); break;
+    case CONTROL('o'): open_file(command_prompt("Open file: %s")); break; 
     case CONTROL('q'): clear_screen(); free(text); exit(0); break;
     case CONTROL('s'): save_file(); break;
     case HOME: curx = 0; break;
@@ -567,17 +570,22 @@ void init_editor() {
 
 // read file from disk
 void open_file(char *file_name) {
+  new_file();
   free(filename);
   filename = strdup(file_name);
   FILE *fp = fopen(file_name, "r");
-  if (!fp) die("fopen");
+  if (!fp) {
+    print_info_message("File \"%s\" not found!", file_name);
+    return;
+  }
   char *line = NULL;
   size_t linecap = 0;
   ssize_t linelen;
+  int old_total_lines = total_lines;
   while ((linelen = getline(&line, &linecap, fp)) != -1) {  
     while (linelen > 0 && (line[linelen-1] == '\n' || line[linelen-1] == '\r')) linelen--;
     insert_row(total_lines, line, linelen);
-  }
+  } if (old_total_lines) { move_cursor(ARROW_DOWN); delete_char(); }
   free(line);
   fclose(fp);
   modified = 0;
@@ -585,7 +593,7 @@ void open_file(char *file_name) {
 
 // write file to disk
 void save_file() {
-  if (filename == NULL) filename = command_prompt("Save as: %s");
+  if (filename == NULL) filename = command_prompt("Save file: %s");
   if (filename == NULL) {
     print_info_message("Save aborted");
     return;
@@ -607,6 +615,16 @@ void save_file() {
   print_info_message("Failed to save file! I/O error: %s", strerror(errno));
 }
 
+// start new file
+void new_file() {
+  if (filename != NULL) { free(filename); filename = NULL; }
+  while (cury < total_lines - 1) move_cursor(ARROW_DOWN);
+  move_cursor(END);
+  while (cury != 0) delete_char();
+  while (curx != 0) delete_char();
+  modified = 0;
+}
+
 /****************************************\
  ========================================
 
@@ -615,6 +633,7 @@ void save_file() {
  ========================================
 \****************************************/
 
+// enter user command
 char *command_prompt(char *command) {
   size_t bufsize = 128;
   char *buf = malloc(bufsize);
