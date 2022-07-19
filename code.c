@@ -63,6 +63,7 @@ int cury = 0;
 int curx = 0;
 int renderx = 0;
 int lastx = 0;
+int userx = 0;
 int lines_number = 0;
 int row_offset = 0;
 int col_offset = 0;
@@ -169,25 +170,37 @@ int get_window_size(int *rows, int *cols) {
 
 // control cursor
 void move_cursor(int key) {
-  if (curx) lastx = curx;
+  lastx = userx;
   text_buffer *row = (cury >= lines_number) ? NULL : &text[cury];
   switch(key) {
     case ARROW_LEFT:
-      if (curx != 0) curx--;
+      if (curx != 0) { curx--; userx--; }
       else if (cury > 0) {
         cury--;
         curx = text[cury].len;
       }
       break;
+    
     case ARROW_RIGHT:
-      if (row && curx < row->len) curx++;
+      if (row && curx < row->len) { curx++; userx++; }
       else if (row && curx == row->len) {
         cury++;
         curx = 0;
       }
       break;
-    case ARROW_UP: if (cury != 0) {cury--; curx = lastx; } break;
-    case ARROW_DOWN: if (cury != lines_number) { cury++; curx = lastx; } break;
+    
+    case ARROW_UP:
+      if (cury != 0) {
+        cury--;
+        curx = lastx;
+      } else curx = 0;
+      break;
+    
+    case ARROW_DOWN:
+      if (cury != lines_number) {
+        cury++;
+        curx = lastx;
+      } break;
   }
   
   row = (cury >= lines_number) ? NULL : &text[cury];
@@ -471,5 +484,4 @@ int main() {
 }
 
 
-
-
+// ddddddddddddddddddddddddddddddddd
