@@ -222,7 +222,7 @@ void move_cursor(int key) {
       } break;
     case ARROW_RIGHT:
       if (row && curx < row->len) { curx++; userx++; }
-      else if (row && curx == row->len) {
+      else if (row && curx == row->len && cury != total_lines - 1) {
         cury++;
         curx = 0;
       } break;
@@ -233,10 +233,11 @@ void move_cursor(int key) {
       } else curx = 0;
       break;
     case ARROW_DOWN:
-      if (cury != total_lines) {
+      if (total_lines && cury != total_lines - 1) {
         cury++;
         curx = lastx;
-      } break;
+      } else if (cury == total_lines - 1) curx = text[total_lines].rlen;
+      break;
   }
   row = (cury >= total_lines) ? NULL : &text[cury];
   int rowlen = row ? row->len : 0;
@@ -270,7 +271,10 @@ void read_keyboard() {
   switch(c) {
     case '\r': insert_new_line(); break;
     case CONTROL('n'): new_file(); break;
-    case CONTROL('o'): open_file(command_prompt("Open file: %s")); break; 
+    case CONTROL('o'): {
+      char *name = command_prompt("Open file: %s");
+      if (name != NULL) open_file(name); break;
+    }
     case CONTROL('q'): clear_screen(); free(text); exit(0); break;
     case CONTROL('s'): save_file(); break;
     case HOME: curx = 0; break;
@@ -290,6 +294,8 @@ void read_keyboard() {
     case ARROW_RIGHT:
     case ARROW_UP:
     case ARROW_DOWN: move_cursor(c); break;
+    case CONTROL('l'):
+    case '\x1b': break;
     default: insert_char(c); break;
   }
 }
@@ -319,21 +325,7 @@ void clear_buffer(struct buffer *buf) { free(buf->string); }
 void print_buffer(struct buffer *buf) {
   for (int row = 0; row < ROWS; row++) {
     int bufrow = row + row_offset;
-    if (bufrow >= total_lines) {
-      if (total_lines == 0 && row == ROWS / 3) {
-        char info[100];
-        int infolen = snprintf(info, sizeof(info), "Minimalist code editor");
-        if (infolen > COLS) infolen = COLS;
-        int padding = (COLS - infolen) / 2;
-        if (padding) {
-          append_buffer(buf, "~", 1);
-          padding--;
-        } while(padding--) append_buffer(buf, " ", 1);
-        append_buffer(buf, info, infolen);
-      } else {
-        append_buffer(buf, "~", 1);
-      }
-    } else {
+    if (bufrow < total_lines) {
       int len = text[bufrow].rlen - col_offset;
       if (len < 0) len = 0;
       if (len > COLS) len = COLS;
@@ -557,7 +549,7 @@ void update_screen() {
 void init_editor() {
   raw_mode();
   if (get_window_size(&ROWS, &COLS) == -1) die("get_window_size");
-  ROWS -= 2; print_info_message("QUIT: Ctrl-q | SAVE: Ctrl-s");  
+  ROWS -= 2; print_info_message("    QUIT: Ctrl-q | NEW: Ctrl-n | OPEN: Ctrl-O | SAVE: Ctrl-s | SHELL: Ctrl-e");
 }
 
 /****************************************\
@@ -574,10 +566,7 @@ void open_file(char *file_name) {
   free(filename);
   filename = strdup(file_name);
   FILE *fp = fopen(file_name, "r");
-  if (!fp) {
-    print_info_message("File \"%s\" not found!", file_name);
-    return;
-  }
+  if (!fp) return;
   char *line = NULL;
   size_t linecap = 0;
   ssize_t linelen;
