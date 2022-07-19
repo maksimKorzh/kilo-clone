@@ -62,6 +62,7 @@ int COLS = 24;
 int cury = 0;
 int curx = 0;
 int renderx = 0;
+int lastx = 0;
 int lines_number = 0;
 int row_offset = 0;
 int col_offset = 0;
@@ -168,6 +169,7 @@ int get_window_size(int *rows, int *cols) {
 
 // control cursor
 void move_cursor(int key) {
+  if (curx) lastx = curx;
   text_buffer *row = (cury >= lines_number) ? NULL : &text[cury];
   switch(key) {
     case ARROW_LEFT:
@@ -184,8 +186,8 @@ void move_cursor(int key) {
         curx = 0;
       }
       break;
-    case ARROW_UP: if (cury != 0)cury--; break;
-    case ARROW_DOWN: if (cury != lines_number)cury++; break;
+    case ARROW_UP: if (cury != 0) {cury--; curx = lastx; } break;
+    case ARROW_DOWN: if (cury != lines_number) { cury++; curx = lastx; } break;
   }
   
   row = (cury >= lines_number) ? NULL : &text[cury];
@@ -377,16 +379,10 @@ void print_status_bar(struct buffer *buf) {
 		  append_buffer(buf, " ", 1);
 		  len_left++;
     }
-  } append_buffer(buf, RESTORE_VIDEO, 3);
-}
-
-// print message bar
-void print_message_bar(struct buffer *buf) {
-  append_buffer(buf, CLEAR_LINE, 3);
-  int msglen = strlen(info_message);
-  if (msglen > COLS) msglen = COLS;
-  if (msglen && time(NULL) - info_message_time < 5)
-    append_buffer(buf, info_message, msglen);
+  }
+  
+  append_buffer(buf, RESTORE_VIDEO, 3);
+  append_buffer(buf, "\r\n", 2);
 }
 
 // print a message under the status bar
@@ -398,7 +394,16 @@ void print_info_message(const char *fmt, ...) {
   info_message_time = time(NULL);
 }
 
-// refresh screen
+// print message bar
+void print_message_bar(struct buffer *buf) {
+  append_buffer(buf, CLEAR_LINE, 3);
+  int msglen = strlen(info_message);
+  if (msglen > COLS) msglen = COLS;
+  if (msglen && time(NULL) - info_message_time < 5)
+    append_buffer(buf, info_message, msglen);
+}
+
+// refresh the screen
 void update_screen() {
   scroll_buffer();
   struct buffer buf = {NULL, 0};
@@ -457,7 +462,7 @@ int main() {
   if (get_window_size(&ROWS, &COLS) == -1) die("get_window_size");
   ROWS -= 2;
   open_file("code.c");
-  print_info_message("Press 'Ctrl-e' to enter command mode");  
+  print_info_message("                       Press 'Ctrl-e' to enter command mode");  
   
   while (1) {
     update_screen();
