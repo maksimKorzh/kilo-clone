@@ -272,7 +272,7 @@ void read_keyboard() {
     case '\r': insert_new_line(); break;
     case CONTROL('n'): new_file(); break;
     case CONTROL('o'): {
-      char *name = command_prompt("Open file: %s");
+      char *name = command_prompt("Open file > %s");
       if (name != NULL) open_file(name); break;
     }
     case CONTROL('q'): clear_screen(); free(text); exit(0); break;
@@ -550,6 +550,7 @@ void init_editor() {
   raw_mode();
   if (get_window_size(&ROWS, &COLS) == -1) die("get_window_size");
   ROWS -= 2; print_info_message("    QUIT: Ctrl-q | NEW: Ctrl-n | OPEN: Ctrl-O | SAVE: Ctrl-s | SHELL: Ctrl-e");
+  insert_new_line(); delete_char();
 }
 
 /****************************************\
@@ -582,11 +583,8 @@ void open_file(char *file_name) {
 
 // write file to disk
 void save_file() {
-  if (filename == NULL) filename = command_prompt("Save file: %s");
-  if (filename == NULL) {
-    print_info_message("Save aborted");
-    return;
-  }
+  if (filename == NULL) filename = command_prompt("Save file > %s");
+  if (filename == NULL) { print_info_message("Save aborted"); return; }
   int len;
   char *buffer = buffer_to_string(&len);
   int fd = open(filename, O_RDWR | O_CREAT, 0644);
