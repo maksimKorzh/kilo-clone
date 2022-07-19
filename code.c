@@ -103,6 +103,7 @@ void delete_char();
 void save_file();
 void append_string(text_buffer *row, char *string, size_t len);
 void delete_row(int row);
+void insert_new_line();
 /****************************************\
  ========================================
 
@@ -244,6 +245,7 @@ void read_keyboard() {
   
   switch(c) {
     case '\r':
+      insert_new_line();
       break;
 
     case CONTROL('q'):
@@ -383,20 +385,20 @@ void update_row(text_buffer *row) {
   row->render_len = index;
 }
 
-// append row
-void append_row(char *string, size_t len) {
+// insert new row to text buffer
+void insert_row(int row, char *string, size_t len) {
+  if (row < 0 || row > lines_number) return;
+  
   text = realloc(text, sizeof(text_buffer) * (lines_number + 1));
+  memmove(&text[row + 1], &text[row], sizeof(text_buffer) * (lines_number - row));
   
-  
-  
-  int linenum = lines_number;
-  text[linenum].string = malloc(len + 1);
-  text[linenum].len = len;
-  memcpy(text[linenum].string, string, len);
-  text[linenum].string[len] = '\0';
-  text[linenum].render = NULL;
-  text[linenum].render_len = 0;
-  update_row(&text[linenum]);
+  text[row].string = malloc(len + 1);
+  text[row].len = len;
+  memcpy(text[row].string, string, len);
+  text[row].string[len] = '\0';
+  text[row].render = NULL;
+  text[row].render_len = 0;
+  update_row(&text[row]);
   lines_number++;
   modified++;
 }
@@ -414,10 +416,25 @@ void update_row_insert(text_buffer *row, int col, int c) {
 
 // insert char to a given row
 void insert_char(int c) {
-  if (cury == lines_number) append_row("", 0);
+  if (cury == lines_number) insert_row(lines_number, "", 0);
   update_row_insert(&text[cury], curx, c);
   curx++;
   userx++;
+}
+
+// insert new line
+void insert_new_line() {
+  if (curx == 0) insert_row(cury, "", 0);
+  else {
+    text_buffer *row = &text[cury];
+    insert_row(cury + 1, &row->string[curx], row->len - curx);
+    row = &text[cury];
+    row->len = curx;
+    row->string[row->len] = '\0';
+    update_row(row);
+  }
+  cury++;
+  curx = 0; userx = 0;
 }
 
 // update row with newly deleted char
@@ -567,7 +584,7 @@ void open_file(char *file_name) {
 
   while ((linelen = getline(&line, &linecap, fp)) != -1) {  
     while (linelen > 0 && (line[linelen-1] == '\n' || line[linelen-1] == '\r')) linelen--;
-    append_row(line, linelen);
+    insert_row(lines_number, line, linelen);
   }
 
   free(line);
