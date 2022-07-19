@@ -104,6 +104,8 @@ void save_file();
 void append_string(text_buffer *row, char *string, size_t len);
 void delete_row(int row);
 void insert_new_line();
+char *command_prompt(char *command);
+
 /****************************************\
  ========================================
 
@@ -594,7 +596,11 @@ void open_file(char *file_name) {
 
 // write file to disk
 void save_file() {
-  if (filename == NULL) return;
+  if (filename == NULL) filename = command_prompt("Save as: %s");
+  if (filename == NULL) {
+    print_info_message("Save aborted");
+    return;
+  }
   
   int len;
   char *buffer = buffer_to_string(&len);
@@ -617,17 +623,56 @@ void save_file() {
 /****************************************\
  ========================================
 
+            SYSTEM INTEGRATION
+
+ ========================================
+\****************************************/
+
+char *command_prompt(char *command) {
+  size_t bufsize = 128;
+  char *buf = malloc(bufsize);
+  size_t buflen = 0;
+  buf[0] = '\0';
+  while(1) {
+    print_info_message(command, buf);
+    update_screen();
+    
+    int c = read_key();
+    if (c == BACKSPACE) { if (buflen != 0) buf[--buflen] = '\0'; }
+    else if (c == '\x1b') {
+      print_info_message("");
+      free(buf);
+      return NULL;
+    } else if (c == '\r') {
+      if (buflen != 0) {
+        print_info_message("");
+        return buf;
+      }
+    } else if (!iscntrl(c) && c < 128) {
+      if (buflen == bufsize - 1) {
+        bufsize *= 2;
+        buf = realloc(buf, bufsize);
+      }
+      buf[buflen++] = c;
+      buf[buflen] = '\0';
+    }
+  }
+}
+
+/****************************************\
+ ========================================
+
                    MAIN
 
  ========================================
 \****************************************/
 
-int main() {
+int main(int argc, char *argv[]) {
   raw_mode();
   if (get_window_size(&ROWS, &COLS) == -1) die("get_window_size");
   ROWS -= 2;
-  open_file("test.txt");
   print_info_message("                       Press 'Ctrl-e' to enter command mode");  
+  if (argc >= 2) open_file(argv[1]);
   
   while (1) {
     update_screen();
