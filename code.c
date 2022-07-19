@@ -1,14 +1,8 @@
 /****************************************\
  ========================================
 
-                   CODE
-
-        minimalist terminal based
-              text editor
-
-                   by
-
-            Code Monkey King
+        Minimalist terminal based
+          text editor for linux
 
  ========================================
 \****************************************/
@@ -459,7 +453,7 @@ void insert_char(int c) {
 
 // call delete char from text buffer row
 void delete_char() {
-  if (cury == total_lines) return;
+  //if (cury == total_lines) return;
   if (curx == 0 && cury == 0) return;
   text_buffer *row = &text[cury];
   if (curx > 0) {
