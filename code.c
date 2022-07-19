@@ -98,13 +98,39 @@ time_t info_message_time = 0;
 struct termios coocked_mode;
 
 // protos
+void clear_screen();
+void die(const char *message);
+void restore_terminal();
+void raw_mode();
+int get_cursor(int *rows, int * cols);
+int get_window_size(int *rows, int *cols);
+void move_cursor(int key);
+int read_key();
+void read_keyboard();
+void append_buffer(struct buffer *buf, const char *string, int len);
+void clear_buffer(struct buffer *buf);
+void print_buffer(struct buffer *buf);
+int curx_to_renderx(text_buffer *row, int current_x);
+void scroll_buffer();
+void update_row(text_buffer *row);
+void insert_row(int row, char *string, size_t len);
+void update_row_insert(text_buffer *row, int col, int c);
 void insert_char(int c);
-void delete_char();
-void save_file();
-void append_string(text_buffer *row, char *string, size_t len);
-void delete_row(int row);
 void insert_new_line();
+void update_row_delete(text_buffer *row, int col);
+void delete_char();
+void append_string(text_buffer *row, char *string, size_t len);
+void free_row(text_buffer *row);
+void delete_row(int row);
+char *buffer_to_string(int *buffer_len);
+void print_status_bar(struct buffer *buf);
+void print_info_message(const char *fmt, ...);
+void print_message_bar(struct buffer *buf);
+void update_screen();
+void open_file(char *file_name);
+void save_file();
 char *command_prompt(char *command);
+
 
 /****************************************\
  ========================================
@@ -122,8 +148,8 @@ void clear_screen() {
 
 // error handling
 void die(const char *message) {
-  clear_screen();
   perror(message);
+  printf("\r");
   exit(1);
 }
 
@@ -252,6 +278,7 @@ void read_keyboard() {
 
     case CONTROL('q'):
       clear_screen();
+      free(text);
       exit(0);
       break;
     
